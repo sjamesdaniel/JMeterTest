@@ -1,0 +1,231 @@
+import java.text.SimpleDateFormat
+gv_timeBeforeTest = null
+gv_timeAfterTest = null
+
+
+node('docker-slave-8')  {
+   
+    try {
+
+	  def app_name = "${env.APP_NAME}".toLowerCase()
+    def environment = "${env.ENVIRONMENT}"
+    def stack_name = "${env.STACK}"
+    def replicas = "${env.REPLICAS}"
+    def SUB_ENV = "${env.SUB_ENV}"
+    def version = "${env.VERSION}"
+    def metric_choice = "All"
+    def to_address = "${env.TO_ADDRESS}"
+    def base_image = "${env.BASE_IMAGE}"
+    def configPath = "${env.configpathtext}".trim()
+    def releaseVersion = "${env.ConfigVersion}"
+    def appnameconfig = "${env.Config_Property_Name}"
+	  def Datadog_Dashboard = "${env.Datadog_Dashboard}"  	
+    
+    echo "**** Build Parameters ****"
+    echo "app_name -> $app_name"
+    echo "environment -> $environment"
+    echo "stack_name -> $stack_name"
+    echo "replicas -> $replicas"
+    echo "subenv -> $SUB_ENV"
+    echo "version -> $version"
+    echo "metric_choice -> $metric_choice"
+    echo "to_address -> $to_address"
+    echo "base_image -> $base_image"
+    echo "configpathtext -> $configPath"
+    echo "releaseVersion -> $releaseVersion"
+    echo "Application Name config -> $appnameconfig"    
+    
+    sh("rm -rf *")
+    deleteDir()
+    if (app_name.equals("clms")) 
+    { 
+      echo "For CLMS no config load required . Proceeding with Deployment"
+      deployproject()
+    } 
+    else 
+    {
+      /** will check for other service and add config load functionality **/
+      configload()  
+      deployproject()        
+    }        
+    checkoutProject()
+  	getloadFromProd()
+    runJMeterScript()
+    downloadSplunkReport()
+    archiveAndEmail()   
+    sh("rm -rf *")         
+	}   
+  catch (Exception e) {
+        sh("rm -rf *") 
+        println 'Exception encountered';      
+        sh("docker rm -f ${app_name}masterjmeter")
+        sh("docker rmi -f ${app_name}jmeterbase")
+        sh("docker rmi -f ${app_name}jmetermaster")
+        sh("docker rmi -f ${app_name}jmeterslave ")    		
+		throw e 
+	}
+} 
+
+def getloadFromProd(){
+  
+	dir("load-from-prod/") {
+		sh ("pwd")
+		sh ("ls")
+		sh ("chmod 777 ScenarioAutomatorV2.jar")
+		sh ("java -jar ScenarioAutomatorV2.jar \"/${app_name}/Configuration/splunk_details.properties\" \"/${app_name}/Configuration/jmeter_config.properties\" ${replicas}")
+		sh ("ls")		
+	}
+	sh("chmod 777 data")
+	sh("chmod 777 load-from-prod/data/CICD_Data/.")
+	sh("cp -r load-from-prod/data/CICD_Data/. data/")
+	sh("cp load-from-prod/${app_name}.jmx jmetertests/${app_name}.jmx")
+	sh("cp load-from-prod/test_summary.properties results-emails/test_summary.properties")
+	sh("cp load-from-prod/prod_load.csv results-emails/prod_load.csv")
+	dir("jmetertests"){
+		echo "Files in jmetertests:"
+		sh ("ls")
+	}
+	dir("results-emails"){
+		echo "Files in results-emails:"
+		sh ("ls")
+	}
+	dir("data"){
+		echo "Files in data:"
+		sh ("ls")
+	}
+}	
+
+
+def deployproject() {
+
+	stage ('Checkout deploy Project from Stash') {
+     // Always check out the main repository, to grab any potential recent changes/pushes
+   checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-docker-spec', url: "ssh://git@stash.dev-charter.net:7999/cont/k8s-deploy-jobs.git"]]])    		
+    echo "=========================checkout over========================="
+    stage "Read Config Files & Deploy"
+         sh("rm -rf ./k8s-configs/")
+         sh("mkdir -p k8s-configs")
+         sh("aws s3 cp s3://com.charter.ms.k8.${environment}.configs/container/${app_name}_${version}_deployment.yaml ./k8s-configs/${app_name}_${version}_deployment.yaml")
+         sh("aws s3 cp s3://com.charter.ms.k8.${environment}.configs/container/${app_name}_${version}_service.yaml ./k8s-configs/${app_name}_${version}_service.yaml || true")
+          /*echo "=========================the deployment yaml file before Update the configurations with stack and replicas ========================="
+          sh("cat /var/lib/jenkins/workspace/no_touch_performance/k8s-configs/${app_name}_${version}_deployment.yaml")*/
+         //Update the configurations with stack and replicas
+         sh("sed -i.bak 's#__STACK_NAME__#${stack}#' ./k8s-configs/${app_name}_${version}_deployment.yaml")
+         sh("sed -i.bak 's#__REPLICAS__#${replicas}#' ./k8s-configs/${app_name}_${version}_deployment.yaml")
+         sh("sed -i.bak 's#__TOMCAT_DOCKER_IMAGE__#${base_image}#' ./k8s-configs/${app_name}_${version}_deployment.yaml")
+         sh("sed -i.bak 's#__SUB_ENV_ACTUAL__#${SUB_ENV}#' ./k8s-configs/${app_name}_${version}_deployment.yaml")
+        /* echo "=========================the list of files available in k8s-configs folder========================="
+          sh("ls -R /var/lib/jenkins/workspace/no_touch_performance/k8s-configs")
+         echo "=========================the deployment yaml file after update========================="
+          sh("cat /var/lib/jenkins/workspace/no_touch_performance/k8s-configs/${app_name}_${version}_deployment.yaml")*/
+         //delete existing folder
+         sh("aws s3 rm s3://com.charter.ms.k8.${environment}.configs/${stack}/${app_name}/ --recursive")
+         //upload the final yamls back to s3
+         sh("aws s3 cp ./k8s-configs/${app_name}_${version}_deployment.yaml s3://com.charter.ms.k8.${environment}.configs/${stack}/${app_name}/${app_name}_${version}_deployment.yaml")
+         echo "upload the final yamls back to s3"
+
+         commonUtils = load './src/utils/common.groovy'
+         def datas = readYaml file: "./configs/deployment.yaml"
+         def stack = commonUtils.findItemInArray(datas.mappings.stacks,"${stack}")
+         sh("echo ${stack}")
+         for (cluster in stack.clusters){
+           sh("echo ${cluster}")
+           def cl = commonUtils.findItemInArray(datas.clusters, cluster)
+           sh("rm -rf ./k8s-configs/*.bak")
+           sh("kubectl --kubeconfig='${cl.configpath}' apply -f ./k8s-configs/${app_name}_${version}_service.yaml || true")
+           sh("kubectl --kubeconfig='${cl.configpath}' apply -f ./k8s-configs/${app_name}_${version}_deployment.yaml")
+           //sh("echo ${cl.configpath}")  
+           //sh("kubectl --kubeconfig='${cl.configpath}' version --short")
+           //sh("kubectl --kubeconfig='${cl.configpath}' get namespaces | grep -v NAME ") 
+           //sh("kubectl --kubeconfig='${cl.configpath}' get pods  --namespace spece | grep '${app_name}' ") 
+                    
+        	}
+    }
+}
+
+def checkoutProject() {
+
+	stage ('Checkout Project from Stash') {
+		// Always check out the main repository, to grab any potential recent changes/pushes
+    checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-docker-spec', url: "ssh://git@stash.dev-charter.net:7999/ztpaf/no_touch_performance.git"]]])
+       
+    }
+	}
+
+def runJMeterScript() {
+
+	stage ('Run JMeter Script') {
+		// We have to take a substring because the 3 extra digits from the default return of .getTime() break our selenium script
+		  	
+    sh ("chmod 777 build.sh")
+    sh ("chmod 777 build_images.sh ")
+    echo "Build jmeter images test"
+    sh ("./build_images.sh $app_name")    
+    gv_timeBeforeTest = new Date().getTime().toString()
+    echo "Begin jmeter test"
+    sh ("./build.sh $app_name specperf")
+	  gv_timeAfterTest = new Date().getTime().toString()
+    sh("sleep 3m")
+		
+	  }
+}
+
+def downloadSplunkReport() {
+
+	stage ('Download Splunk Report') {
+		dir("results-emails"){
+			echo "Getting Splunk Results for this test"
+			sh ("chmod 777 NoTouchDownloadSplunk.jar")
+			if (app_name.equals("appedge")) 
+				sh "java -jar NoTouchDownloadSplunk.jar splunk_details.properties ${gv_timeBeforeTest} ${gv_timeAfterTest} $app_name ${stack}"
+			else if(app_name.equals("clms")) 
+				sh "java -jar NoTouchDownloadSplunk.jar splunk_details_clms.properties ${gv_timeBeforeTest} ${gv_timeAfterTest} $app_name ${stack}"
+			else
+				sh "java -jar NoTouchDownloadSplunk.jar splunk_details.properties ${gv_timeBeforeTest} ${gv_timeAfterTest} $app_name ${stack}"
+			sh "ls"
+		}
+    }
+}
+
+def archiveAndEmail() {
+
+	stage ('Archive Artifacts and Send Email') {
+		
+		// This is to remove white spaces in the environment variable, (choice param) $METRIC_CHOICE,
+		// in the case where $METRIC_CHOICE contains a space in the value. This is so that when you 
+		// pass the variable on the command line, Java doesn't treat the portion of the value after 
+		// the space as an extra argument.
+    // Same idea as described above for trimming whitespace. In the case where more than one toAddress is provided.
+    String trimmedToAddress = "${env.TO_ADDRESS}".replaceAll("\\s+","")
+    def releaseVersion = "${env.ConfigVersion}"
+   	
+    dir("results-emails"){
+		sh ("chmod 777 NoTouchEmail.jar")
+		if(app_name.equals("clms")) 
+			sh "java -jar NoTouchEmail.jar email_details.properties ${gv_timeBeforeTest} ${gv_timeAfterTest} $app_name ${stack} ${trimmedToAddress} ${version} ${releaseVersion} \"${Datadog_Dashboard}\" Observationstagging_clms.properties"
+		else
+			sh "java -jar NoTouchEmail.jar email_details.properties ${gv_timeBeforeTest} ${gv_timeAfterTest} $app_name ${stack} ${trimmedToAddress} ${version} ${releaseVersion} \"${Datadog_Dashboard}\" Observationstagging.properties"
+		
+		
+	}
+    	     
+	}
+ 	
+}
+
+def configload() {
+  stage ('Download') {  
+  
+  node ('IE-Radiation-slave') 
+      {
+        checkout([$class: 'GitSCM', branches: [[name: '*/configload']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-docker-spec', url: "ssh://git@stash.dev-charter.net:7999/lin/performance-automation.git"]]])
+        sh ("chmod 777 ./property-files/configload.sh")
+	    	def appnameconfig="${env.Config_Property_Name}"
+        def releaseVersion = "${env.ConfigVersion}"
+        def environment = "${env.STACK}"
+        sh("./property-files/configload.sh config_load ${environment} ${appnameconfig} ${releaseVersion}")
+        sh("rm -rf *")
+        
+       }  
+      }                     
+}
