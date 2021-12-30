@@ -33,7 +33,7 @@ def checkoutProject()
     try
     {
 		// Always check out the main repository, to grab any potential recent changes/pushes
-    checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'ce2access', url: "ssh://git@github.com:sjamesdaniel/JMeterTest.git"]]])
+    checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'ce2access', url: "git@github.com:sjamesdaniel/JMeterTest.git"]]])
     }
    catch (Exception e)
 	{
