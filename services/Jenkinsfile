@@ -5,9 +5,7 @@ node()
 {
     try {
     
-    echo "**** Build Parameters ****"
-    echo "base_image -> $base_image" 
-    
+    echo "**** Build Parameters ****"    
     sh("rm -rf *")
     deleteDir()
     checkoutProject()
