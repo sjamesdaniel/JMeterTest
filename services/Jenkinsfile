@@ -14,7 +14,7 @@ node()
 	}   
    catch (Exception e)
 	{
-        sh("rm -rf *") 
+        //sh("rm -rf *") 
         println 'Exception encountered';      
         sh("sudo docker rm -f masterjmeter")
         sh("sudo docker rmi -f jmeterbase")
@@ -29,8 +29,18 @@ def checkoutProject()
 
     stage ('Checkout Project from Stash')
 	{
+    echo "**** Chcking out Project ****"    
+    try
+    {
 		// Always check out the main repository, to grab any potential recent changes/pushes
     checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "/home/ubuntu/jmeterrepo/"]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'ubuntu', url: "ssh://git@github.com:sjamesdaniel/JMeterTest.git"]]])
+    }
+   catch (Exception e)
+	{
+        println 'Exception encountered during Checkout';        		
+		throw e 
+	}
+		
        }
 }
 
