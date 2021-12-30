@@ -1,10 +1,6 @@
 import java.text.SimpleDateFormat
 gv_timeBeforeTest = null
 gv_timeAfterTest = null
-
-
-node('docker-slave-8') 
-{
    
     try {
     
@@ -14,17 +10,17 @@ node('docker-slave-8')
     sh("rm -rf *")
     deleteDir()
     checkoutProject()
-    runJMeterScript()
+   // runJMeterScript()
     sh("rm -rf *")         
 	}   
    catch (Exception e)
 	{
         sh("rm -rf *") 
         println 'Exception encountered';      
-        sh("docker rm -f ${app_name}masterjmeter")
-        sh("docker rmi -f ${app_name}jmeterbase")
-        sh("docker rmi -f ${app_name}jmetermaster")
-        sh("docker rmi -f ${app_name}jmeterslave ")    		
+        sh("docker rm -f masterjmeter")
+        sh("docker rmi -f jmeterbase")
+        sh("docker rmi -f jmetermaster")
+        sh("docker rmi -f jmeterslave ")    		
 		throw e 
 	}
 } 
@@ -35,7 +31,7 @@ def checkoutProject()
     stage ('Checkout Project from Stash')
 	{
 		// Always check out the main repository, to grab any potential recent changes/pushes
-    checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "."]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins-docker-spec', url: "ssh://git@stash.dev-charter.net:7999/ztpaf/no_touch_performance.git"]]])
+    checkout([$class: 'GitSCM', branches: [[name: '*/master']], doGenerateSubmoduleConfigurations: false, extensions: [[$class: 'RelativeTargetDirectory', relativeTargetDir: "/home/ubuntu/jmeterrepo/"]], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'ubuntu', url: "ssh://git@github.com:sjamesdaniel/JMeterTest.git"]]])
        }
 }
 
