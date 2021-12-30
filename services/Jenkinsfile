@@ -12,16 +12,16 @@ node()
     deleteDir()
     checkoutProject()
    // runJMeterScript()
-    sh("rm -rf *")         
+    //sh("rm -rf *")         
 	}   
    catch (Exception e)
 	{
         sh("rm -rf *") 
         println 'Exception encountered';      
-        sh("docker rm -f masterjmeter")
-        sh("docker rmi -f jmeterbase")
-        sh("docker rmi -f jmetermaster")
-        sh("docker rmi -f jmeterslave ")    		
+        sh("sudo docker rm -f masterjmeter")
+        sh("sudo docker rmi -f jmeterbase")
+        sh("sudo docker rmi -f jmetermaster")
+        sh("sudo docker rmi -f jmeterslave ")    		
 		throw e 
 	}
 }
