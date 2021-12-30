@@ -23,7 +23,7 @@ gv_timeAfterTest = null
         sh("docker rmi -f jmeterslave ")    		
 		throw e 
 	}
-} 
+
 
 def checkoutProject()
 {
