@@ -1,7 +1,8 @@
 import java.text.SimpleDateFormat
 gv_timeBeforeTest = null
 gv_timeAfterTest = null
-   
+node()
+{
     try {
     
     echo "**** Build Parameters ****"
@@ -23,7 +24,7 @@ gv_timeAfterTest = null
         sh("docker rmi -f jmeterslave ")    		
 		throw e 
 	}
-
+}
 
 def checkoutProject()
 {
